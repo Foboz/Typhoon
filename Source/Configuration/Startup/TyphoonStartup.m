@@ -40,7 +40,14 @@
 
 + (void)load
 {
+  NSBundle *bundle = [NSBundle mainBundle];
+  NSDictionary *bundleInfoDictionary = [bundle infoDictionary];
+  NSDictionary *extension = bundleInfoDictionary[@"NSExtension"];
+  if (extension != nil) {
+    [self swizzleAwakeFromNibOnMainClassWithExtensionMainStoryboardName:extension[@"NSExtensionMainStoryboard"]];
+  } else {
     [self swizzleSetDelegateMethodOnApplicationClass];
+  }
 }
 
 + (TyphoonComponentFactory *)factoryFromAppDelegate:(id)appDelegate
@@ -143,6 +150,60 @@ static id initialAppDelegate = nil;
         usingBlock:^(NSNotification *note) {
             [weakSelf releaseInitialFactory];
         }];
+}
+
++ (void)swizzleAwakeFromNibOnMainClassWithExtensionMainStoryboardName:(NSString *)storyboardName
+{
+  UIStoryboard *storyboard = [UIStoryboard storyboardWithName:storyboardName bundle:[NSBundle mainBundle]];
+  UIViewController *extensionDelegate = [storyboard instantiateInitialViewController];
+  
+  SEL sel = @selector(awakeFromNib);
+  
+  Method method = class_getInstanceMethod([extensionDelegate class], sel);
+  void(*originalImp)(id, SEL) = (void (*)(id, SEL))method_getImplementation(method);
+  
+  IMP adjustedImp = imp_implementationWithBlock(^(id instance) {
+    if (!extensionDelegate || initialAppDelegate) {
+      originalImp(instance, sel);
+      return;
+    }
+    //This ensures that Typhoon startup runs only once
+    initialAppDelegate = extensionDelegate;
+    
+    
+    [self requireInitialFactory];
+    id factoryFromDelegate = [self factoryFromAppDelegate:extensionDelegate];
+    if (factoryFromDelegate && initialFactory) {
+      [NSException raise:NSInternalInconsistencyException
+                  format:@"The method 'initialFactory' is implemented on %@, also Info.plist"
+       " has 'TyphoonInitialAssemblies' key. Typhoon can't decide which factory to use.",
+       [extensionDelegate class]];
+    }
+    if (factoryFromDelegate) {
+      initialFactory = factoryFromDelegate;
+    }
+    if (initialFactory) {
+      TyphoonGlobalConfigCollector *collector = [[TyphoonGlobalConfigCollector alloc] initWithAppDelegate:extensionDelegate];
+      NSBundle *bundle = [NSBundle bundleForClass:[extensionDelegate class]];
+      NSArray *globalConfigFileNames = [collector obtainGlobalConfigFilenamesFromBundle:bundle];
+      for (NSString *configName in globalConfigFileNames) {
+        id<TyphoonDefinitionPostProcessor> configProcessor = [TyphoonConfigPostProcessor forResourceNamed:configName inBundle:bundle];
+        [initialFactory attachDefinitionPostProcessor:configProcessor];
+      }
+      
+      [self injectInitialFactoryIntoDelegate:extensionDelegate];
+    }
+    [self releaseInitialFactoryWhenAwakeFromNibFinished];
+    
+    originalImp(instance, sel);
+  });
+  
+  method_setImplementation(method, adjustedImp);
+}
+
++ (void)releaseInitialFactoryWhenAwakeFromNibFinished
+{
+  [weakSelf releaseInitialFactory];
 }
 
 + (void)releaseInitialFactory
