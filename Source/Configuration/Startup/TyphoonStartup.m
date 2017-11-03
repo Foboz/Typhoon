@@ -41,10 +41,11 @@
 + (void)load
 {
   NSBundle *bundle = [NSBundle mainBundle];
+//  TyphoonInitialAssemblies
   NSDictionary *bundleInfoDictionary = [bundle infoDictionary];
-  NSDictionary *extension = bundleInfoDictionary[@"NSExtension"];
-  if (extension != nil) {
-    [self swizzleAwakeFromNibOnMainClassWithExtensionMainStoryboardName:extension[@"NSExtensionMainStoryboard"]];
+  NSString *viewControllerDelegateClassName = bundleInfoDictionary[@"TyphoonInitialUIViewControllerClass"];
+  if (viewControllerDelegateClassName != nil) {
+    [self swizzleAwakeFromNibOnMainClass:viewControllerDelegateClassName];
   } else {
     [self swizzleSetDelegateMethodOnApplicationClass];
   }
@@ -152,46 +153,44 @@ static id initialAppDelegate = nil;
         }];
 }
 
-+ (void)swizzleAwakeFromNibOnMainClassWithExtensionMainStoryboardName:(NSString *)storyboardName
++ (void)swizzleAwakeFromNibOnMainClass:(NSString *)className
 {
-  UIStoryboard *storyboard = [UIStoryboard storyboardWithName:storyboardName bundle:[NSBundle mainBundle]];
-  UIViewController *extensionDelegate = [storyboard instantiateInitialViewController];
-  
   SEL sel = @selector(awakeFromNib);
+  Class class = NSClassFromString(className);
   
-  Method method = class_getInstanceMethod([extensionDelegate class], sel);
+  Method method = class_getInstanceMethod(class, sel);
   void(*originalImp)(id, SEL) = (void (*)(id, SEL))method_getImplementation(method);
   
   IMP adjustedImp = imp_implementationWithBlock(^(id instance) {
-    if (!extensionDelegate || initialAppDelegate) {
+    if (!instance || initialAppDelegate) {
       originalImp(instance, sel);
       return;
     }
     //This ensures that Typhoon startup runs only once
-    initialAppDelegate = extensionDelegate;
+    initialAppDelegate = instance;
     
     
     [self requireInitialFactory];
-    id factoryFromDelegate = [self factoryFromAppDelegate:extensionDelegate];
+    id factoryFromDelegate = [self factoryFromAppDelegate:instance];
     if (factoryFromDelegate && initialFactory) {
       [NSException raise:NSInternalInconsistencyException
                   format:@"The method 'initialFactory' is implemented on %@, also Info.plist"
        " has 'TyphoonInitialAssemblies' key. Typhoon can't decide which factory to use.",
-       [extensionDelegate class]];
+       instance];
     }
     if (factoryFromDelegate) {
       initialFactory = factoryFromDelegate;
     }
     if (initialFactory) {
-      TyphoonGlobalConfigCollector *collector = [[TyphoonGlobalConfigCollector alloc] initWithAppDelegate:extensionDelegate];
-      NSBundle *bundle = [NSBundle bundleForClass:[extensionDelegate class]];
+      TyphoonGlobalConfigCollector *collector = [[TyphoonGlobalConfigCollector alloc] initWithAppDelegate:instance];
+      NSBundle *bundle = [NSBundle bundleForClass:class];
       NSArray *globalConfigFileNames = [collector obtainGlobalConfigFilenamesFromBundle:bundle];
       for (NSString *configName in globalConfigFileNames) {
         id<TyphoonDefinitionPostProcessor> configProcessor = [TyphoonConfigPostProcessor forResourceNamed:configName inBundle:bundle];
         [initialFactory attachDefinitionPostProcessor:configProcessor];
       }
       
-      [self injectInitialFactoryIntoDelegate:extensionDelegate];
+      [self injectInitialFactoryIntoDelegate:instance];
     }
     [self releaseInitialFactoryWhenAwakeFromNibFinished];
     
