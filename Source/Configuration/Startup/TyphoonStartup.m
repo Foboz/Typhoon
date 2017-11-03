@@ -203,7 +203,7 @@ static id initialAppDelegate = nil;
 
 + (void)releaseInitialFactoryWhenAwakeFromNibFinished
 {
-  [weakSelf releaseInitialFactory];
+  [self releaseInitialFactory];
 }
 
 + (void)releaseInitialFactory
