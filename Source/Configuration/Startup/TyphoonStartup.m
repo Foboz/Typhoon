@@ -44,8 +44,9 @@
 //  TyphoonInitialAssemblies
   NSDictionary *bundleInfoDictionary = [bundle infoDictionary];
   NSString *viewControllerDelegateClassName = bundleInfoDictionary[@"TyphoonInitialUIViewControllerClass"];
-  if (viewControllerDelegateClassName != nil) {
-    [self swizzleAwakeFromNibOnMainClass:viewControllerDelegateClassName];
+  NSString *viewControllerDelegateSelectorName = bundleInfoDictionary[@"TyphoonInitialUIViewControllerSelector"];
+  if (viewControllerDelegateClassName != nil && viewControllerDelegateSelectorName != nil) {
+    [self swizzleSelectorOnMainClass:viewControllerDelegateClassName selectorName:viewControllerDelegateSelectorName];
   } else {
     [self swizzleSetDelegateMethodOnApplicationClass];
   }
@@ -153,9 +154,9 @@ static id initialAppDelegate = nil;
         }];
 }
 
-+ (void)swizzleAwakeFromNibOnMainClass:(NSString *)className
++ (void)swizzleSelectorOnMainClass:(NSString *)className selectorName:(NSString *)selectorName
 {
-  SEL sel = @selector(awakeFromNib);
+  SEL sel = NSSelectorFromString(selectorName);
   Class class = NSClassFromString(className);
   
   Method method = class_getInstanceMethod(class, sel);
