@@ -20,6 +20,7 @@
 #import "TyphoonAssemblyBuilder+PlistProcessor.h"
 #import "TyphoonAssemblyBuilder.h"
 #import "TyphoonGlobalConfigCollector.h"
+#import "TyphoonExtensionAppDelegate.h"
 
 #import <objc/runtime.h>
 
@@ -43,10 +44,10 @@
   NSBundle *bundle = [NSBundle mainBundle];
 //  TyphoonInitialAssemblies
   NSDictionary *bundleInfoDictionary = [bundle infoDictionary];
-  NSString *viewControllerDelegateClassName = bundleInfoDictionary[@"TyphoonInitialUIViewControllerClass"];
-  NSString *viewControllerDelegateSelectorName = bundleInfoDictionary[@"TyphoonInitialUIViewControllerSelector"];
-  if (viewControllerDelegateClassName != nil && viewControllerDelegateSelectorName != nil) {
-    [self swizzleSelectorOnMainClass:viewControllerDelegateClassName selectorName:viewControllerDelegateSelectorName];
+  NSString *swizzleClassName = bundleInfoDictionary[@"TyphoonExtension"][@"swizzleClass"];
+  NSString *swizzleSelectorName = bundleInfoDictionary[@"TyphoonExtension"][@"swizzleSelector"];
+  if (swizzleClassName != nil && swizzleSelectorName != nil) {
+    [self swizzleSelectorOnMainClass:swizzleClassName selectorName:swizzleSelectorName];
   } else {
     [self swizzleSetDelegateMethodOnApplicationClass];
   }
@@ -156,6 +157,19 @@ static id initialAppDelegate = nil;
 
 + (void)swizzleSelectorOnMainClass:(NSString *)className selectorName:(NSString *)selectorName
 {
+  NSDictionary *bundleInfoDictionary = [[NSBundle mainBundle] infoDictionary];
+  NSString *extensionInitialAppDelegate = bundleInfoDictionary[@"TyphoonExtension"][@"appDelegateClass"];
+  Class extensionAppDelegateClass = NSClassFromString(extensionInitialAppDelegate);
+  if (!extensionAppDelegateClass) {
+    extensionAppDelegateClass = [TyphoonExtensionAppDelegate class];
+  } else {
+    Class parentClass = class_getSuperclass(extensionAppDelegateClass);
+    if (parentClass != [TyphoonExtensionAppDelegate class]) {
+      extensionAppDelegateClass = [TyphoonExtensionAppDelegate class];
+    }
+  }
+  id extensionAppDelegate = [extensionAppDelegateClass performSelector:@selector(shared)];
+    
   SEL sel = NSSelectorFromString(selectorName);
   Class class = NSClassFromString(className);
   
@@ -168,22 +182,22 @@ static id initialAppDelegate = nil;
       return;
     }
     //This ensures that Typhoon startup runs only once
-    initialAppDelegate = instance;
+    initialAppDelegate = extensionAppDelegate;
     
     
     [self requireInitialFactory];
-    id factoryFromDelegate = [self factoryFromAppDelegate:instance];
+    id factoryFromDelegate = [self factoryFromAppDelegate:extensionAppDelegate];
     if (factoryFromDelegate && initialFactory) {
       [NSException raise:NSInternalInconsistencyException
                   format:@"The method 'initialFactory' is implemented on %@, also Info.plist"
        " has 'TyphoonInitialAssemblies' key. Typhoon can't decide which factory to use.",
-       instance];
+       extensionAppDelegate];
     }
     if (factoryFromDelegate) {
       initialFactory = factoryFromDelegate;
     }
     if (initialFactory) {
-      TyphoonGlobalConfigCollector *collector = [[TyphoonGlobalConfigCollector alloc] initWithAppDelegate:instance];
+      TyphoonGlobalConfigCollector *collector = [[TyphoonGlobalConfigCollector alloc] initWithAppDelegate:extensionAppDelegate];
       NSBundle *bundle = [NSBundle bundleForClass:class];
       NSArray *globalConfigFileNames = [collector obtainGlobalConfigFilenamesFromBundle:bundle];
       for (NSString *configName in globalConfigFileNames) {
@@ -191,7 +205,7 @@ static id initialAppDelegate = nil;
         [initialFactory attachDefinitionPostProcessor:configProcessor];
       }
       
-      [self injectInitialFactoryIntoDelegate:instance];
+      [self injectInitialFactoryIntoDelegate:extensionAppDelegate];
     }
     [self releaseInitialFactoryWhenAwakeFromNibFinished];
     
