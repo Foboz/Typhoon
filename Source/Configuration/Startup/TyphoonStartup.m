@@ -174,11 +174,11 @@ static id initialAppDelegate = nil;
   Class class = NSClassFromString(className);
   
   Method method = class_getInstanceMethod(class, sel);
-  void(*originalImp)(id, SEL) = (void (*)(id, SEL))method_getImplementation(method);
+  void(*originalImp)(id, SEL, id) = (void (*)(id, SEL, id))method_getImplementation(method);
   
-  IMP adjustedImp = imp_implementationWithBlock(^(id instance) {
+  IMP adjustedImp = imp_implementationWithBlock(^(id instance, id delegate) {
     if (!instance || initialAppDelegate) {
-      originalImp(instance, sel);
+      originalImp(instance, sel, delegate);
       return;
     }
     //This ensures that Typhoon startup runs only once
@@ -209,7 +209,7 @@ static id initialAppDelegate = nil;
     }
     [self releaseInitialFactoryWhenAwakeFromNibFinished];
     
-    originalImp(instance, sel);
+    originalImp(instance, sel, delegate);
   });
   
   method_setImplementation(method, adjustedImp);
